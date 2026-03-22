@@ -65,7 +65,6 @@ jobs:
 
           icon_dir = "ios/App/App/Assets.xcassets/AppIcon.appiconset"
           os.makedirs(icon_dir, exist_ok=True)
-
           for fname, sz in sizes.items():
               img = Image.new("RGB", (sz, sz), "#1a1a2e")
               draw = ImageDraw.Draw(img)
@@ -87,7 +86,8 @@ jobs:
               ("AppIcon-76", ["ipad"], "76x76", [2]),
               ("AppIcon-83.5", ["ipad"], "83.5x83.5", [2]),
               ("AppIcon-1024", ["ios-marketing"], "1024x1024", [1])
-          ]          for prefix, idioms, size, scales in icon_map:
+          ]
+          for prefix, idioms, size, scales in icon_map:
               for idiom in idioms:
                   for scale in scales:
                       fname = f"{prefix}@{scale}x.png" if scale > 1 else f"{prefix}.png"
@@ -176,7 +176,8 @@ jobs:
           cd ios/App
           xcodebuild archive \
             -workspace App.xcworkspace \
-            -scheme "$SCHEME" \            -configuration Release \
+            -scheme "$SCHEME" \
+            -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
