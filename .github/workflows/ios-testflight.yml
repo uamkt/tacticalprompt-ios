@@ -175,65 +175,52 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
+            CODE_SIGN_IDENTITY="$SIGN_ID" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE="$PP_UUID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
             -quiet
 
-      - name: Sign and package IPA
+      - name: Export IPA
         run: |
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          APP_PATH="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          cat > $RUNNER_TEMP/ExportOptions.plist << 'EXPORTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>545S5F426R</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.uamkoreatech.tacticalprompt</key>
+              <string>TacticalPrompt AppStore</string>
+            </dict>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EXPORTEOF
 
-          security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportPath $RUNNER_TEMP/output \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -quiet
 
-          if [ ! -s $RUNNER_TEMP/profile_decoded.plist ]; then
-            echo "ERROR: profile_decoded.plist missing from provisioning step"
-            exit 1
-          fi
-          echo "Profile decoded successfully (reusing from provisioning step)"
-
-          /usr/libexec/PlistBuddy -x -c "Print Entitlements" $RUNNER_TEMP/profile_decoded.plist > $RUNNER_TEMP/entitlements.plist
-
-          echo "Entitlements:"
-          cat $RUNNER_TEMP/entitlements.plist
-
-          cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
-
-          echo "Signing with identity: $SIGN_ID"
-          if [ -z "$SIGN_ID" ]; then
-            echo "ERROR: No signing identity available"
-            exit 1
-          fi
-
-          if [ -d "$APP_PATH/Frameworks" ]; then
-            find "$APP_PATH/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) | while read fw; do
-              echo "Signing framework: $fw"
-              codesign --force --sign "$SIGN_ID" --timestamp=none "$fw"
-            done
-          fi
-
-          codesign --force --sign "$SIGN_ID" \
-            --entitlements $RUNNER_TEMP/entitlements.plist \
-            --timestamp=none \
-            "$APP_PATH"
-
-          codesign --verify --deep --strict "$APP_PATH" && echo "Code signature valid"
-
-          mkdir -p $RUNNER_TEMP/Payload
-          cp -r "$APP_PATH" $RUNNER_TEMP/Payload/
-          mkdir -p $RUNNER_TEMP/output
-          cd $RUNNER_TEMP && zip -qr output/App.ipa Payload
-
-          echo "IPA size: $(du -h $RUNNER_TEMP/output/App.ipa | cut -f1)"
+          echo "IPA exported to:"
+          ls -la $RUNNER_TEMP/output/*.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TacticalPrompt-IPA
-          path: ${{ runner.temp }}/output/App.ipa
+          name: app-ipa
+          path: ${{ runner.temp }}/output/*.ipa
 
       - name: Upload to TestFlight
         run: |
