@@ -1,0 +1,28 @@
+{
+  "appId": "com.uamkoreatech.tacticalprompt",
+  "appName": "TacticalPrompt",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#1a1a2e",
+    "preferredContentMode": "mobile",
+    "scheme": "App"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1a1a2e",
+      "showSpinner": false,
+      "launchAutoHide": true
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#1a1a2e"
+    }
+  },
+  "server": {
+    "url": "https://tacticalprompt.blogspot.com",
+    "cleartext": false
+  }
+}
