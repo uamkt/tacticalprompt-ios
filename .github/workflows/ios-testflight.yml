@@ -1,0 +1,299 @@
+name: iOS TestFlight Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_ID: "com.uamkoreatech.tacticalprompt"
+  APP_NAME: "TacticalPrompt"
+  SCHEME: "App"
+  XCODE_VERSION: "16.2"
+
+jobs:
+  build-and-deploy:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app/Contents/Developer
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Verify web assets
+        run: |
+          echo "Checking dist/ directory..."
+          ls -la dist/
+          if [ ! -f dist/index.html ]; then
+            echo "ERROR: dist/index.html not found!"
+            exit 1
+          fi
+          echo "Web assets verified successfully"
+
+      - name: Install Capacitor iOS platform
+        run: |
+          npm install @capacitor/ios
+          npx cap add ios || true
+          npx cap sync ios
+
+      - name: Generate TacticalPrompt app icon programmatically
+        run: |
+          pip3 install --break-system-packages Pillow --quiet
+          python3 << 'PYEOF'
+          from PIL import Image, ImageDraw, ImageFont
+          import math, os, json
+
+          SIZE = 1024
+          img = Image.new('RGBA', (SIZE, SIZE), (0, 0, 0, 0))
+          draw = ImageDraw.Draw(img)
+
+          bg = (26, 26, 46)
+          accent = (0, 229, 255)
+          dark_accent = (0, 150, 200)
+
+          draw.rounded_rectangle([0, 0, SIZE, SIZE], radius=180, fill=bg)
+
+          cx, cy = SIZE // 2, SIZE // 2 - 60
+          outer_r = 280
+          inner_r = 180
+          teeth = 12
+          tooth_h = 50
+
+          gear_points = []
+          for i in range(teeth * 2):
+              angle = math.pi * 2 * i / (teeth * 2) - math.pi / 2
+              if i % 2 == 0:
+                  r = outer_r + tooth_h
+              else:
+                  r = outer_r
+              x = cx + r * math.cos(angle)
+              y = cy + r * math.sin(angle)
+              gear_points.append((x, y))
+          draw.polygon(gear_points, fill=dark_accent, outline=accent, width=4)
+
+          draw.ellipse([cx - inner_r, cy - inner_r, cx + inner_r, cy + inner_r],
+                       fill=bg, outline=accent, width=4)
+
+          line_len = 120
+          draw.line([(cx - line_len, cy), (cx + line_len, cy)], fill=accent, width=4)
+          draw.line([(cx, cy - line_len), (cx, cy + line_len)], fill=accent, width=4)
+
+          draw.ellipse([cx - 20, cy - 20, cx + 20, cy + 20], fill=accent)
+
+          for r in [60, 100]:
+              draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=accent, width=2)
+
+          for i in range(5):
+              x_start = 200 + i * 130
+              y_base = 820
+              heights = [0, -30, -60, -30, 0] if i % 2 == 0 else [0, -20, -40, -20, 0]
+              points = [(x_start + j * 8, y_base + h) for j, h in enumerate(heights)]
+              if len(points) > 1:
+                  draw.line(points, fill=accent, width=3)
+
+          try:
+              font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 100)
+          except:
+              try:
+                  font_large = ImageFont.truetype("/Library/Fonts/Arial Bold.ttf", 100)
+              except:
+                  font_large = ImageFont.load_default()
+
+          bbox = draw.textbbox((0, 0), "TP", font=font_large)
+          tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+          draw.text((cx - tw // 2, cy - th // 2 - 10), "TP", fill=accent, font=font_large)
+
+          try:
+              font_sub = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 56)
+          except:
+              try:
+                  font_sub = ImageFont.truetype("/Library/Fonts/Arial.ttf", 56)
+              except:
+                  font_sub = ImageFont.load_default()
+
+          label = "TacticalPrompt"
+          bbox2 = draw.textbbox((0, 0), label, font=font_sub)
+          lw = bbox2[2] - bbox2[0]
+          draw.text((cx - lw // 2, 900), label, fill=(255, 255, 255), font=font_sub)
+
+          out = Image.new('RGB', (SIZE, SIZE), bg)
+          out.paste(img, mask=img.split()[3])
+
+          icon_dir = "ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          os.makedirs(icon_dir, exist_ok=True)
+          out.save(os.path.join(icon_dir, "AppIcon-1024.png"), "PNG")
+
+          contents = {
+              "images": [{"filename": "AppIcon-1024.png", "idiom": "universal",
+                          "platform": "ios", "size": "1024x1024"}],
+              "info": {"author": "xcode", "version": 1}
+          }
+          with open(os.path.join(icon_dir, "Contents.json"), "w") as f:
+              json.dump(contents, f, indent=2)
+
+          print("TacticalPrompt icon generated successfully!")
+          PYEOF
+          echo "App icon generation complete"
+
+      - name: Set build number
+        run: |
+          BUILD_NUMBER=${{ github.run_number }}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/App/App/Info.plist
+          echo "Build number set to $BUILD_NUMBER"
+
+      - name: Setup provisioning
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # Decode certificate and provisioning profile from committed files
+          base64 --decode -i certs/dist_certificate.b64 -o $CERTIFICATE_PATH
+          echo "Certificate file size: $(wc -c < $CERTIFICATE_PATH) bytes"
+
+          base64 --decode -i provisioning/tacticalprompt_appstore.b64 -o $PP_PATH
+          echo "Profile file size: $(wc -c < $PP_PATH) bytes"
+
+          # Create and configure signing keychain
+          security create-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+
+          # Import distribution certificate
+          security import $CERTIFICATE_PATH -P "blisd2024" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH || true
+          security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # Extract profile metadata
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+          PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" $RUNNER_TEMP/profile_decoded.plist)
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" $RUNNER_TEMP/profile_decoded.plist)
+          PP_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" $RUNNER_TEMP/profile_decoded.plist)
+
+          echo "PP_UUID=$PP_UUID" >> $GITHUB_ENV
+          echo "TEAM_ID=$TEAM_ID" >> $GITHUB_ENV
+          echo "PP_NAME=$PP_NAME" >> $GITHUB_ENV
+          echo "Profile: UUID=$PP_UUID TEAM=$TEAM_ID NAME=$PP_NAME"
+
+          # Install profile
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
+
+      - name: Disable code signing for Pods
+        run: |
+          cd ios/App
+          python3 << 'PYEOF'
+          with open('Podfile', 'r') as f:
+            content = f.read()
+          inject = """
+              installer.pods_project.targets.each do |target|
+                target.build_configurations.each do |config|
+                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                  config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                  config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                end
+              end
+          """
+          content = content.replace(
+            'post_install do |installer|',
+            'post_install do |installer|' + inject
+          )
+          with open('Podfile', 'w') as f:
+            f.write(content)
+          PYEOF
+          cat Podfile
+          pod install
+
+      - name: Build archive (unsigned)
+        run: |
+          cd ios/App
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme "${{ env.SCHEME }}" \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -sdk iphoneos \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+
+      - name: Sign and package IPA
+        run: |
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          APP_PATH="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+
+          # Extract entitlements from provisioning profile via security cms
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+          /usr/libexec/PlistBuddy -x -c "Print Entitlements" $RUNNER_TEMP/profile_decoded.plist > $RUNNER_TEMP/entitlements.plist
+
+          echo "Entitlements:"
+          cat $RUNNER_TEMP/entitlements.plist
+
+          # Embed provisioning profile in app bundle
+          cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
+
+          # Sign all frameworks first
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) | while read fw; do
+              echo "Signing framework: $fw"
+              codesign --force --sign "Apple Distribution" --timestamp=none "$fw"
+            done
+          fi
+
+          # Sign the main app with entitlements
+          codesign --force --sign "Apple Distribution" \
+            --entitlements $RUNNER_TEMP/entitlements.plist \
+            --timestamp=none \
+            "$APP_PATH"
+
+          # Verify code signature
+          codesign --verify --deep --strict "$APP_PATH" && echo "Code signature valid"
+
+          # Package IPA manually
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -r "$APP_PATH" $RUNNER_TEMP/Payload/
+          mkdir -p $RUNNER_TEMP/output
+          cd $RUNNER_TEMP && zip -qr output/App.ipa Payload
+
+          echo "IPA size: $(du -h $RUNNER_TEMP/output/App.ipa | cut -f1)"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TacticalPrompt-IPA
+          path: ${{ runner.temp }}/output/App.ipa
+          retention-days: 30
+
+      - name: Upload to TestFlight
+        run: |
+          mkdir -p ~/private_keys
+          cp certs/AuthKey_599L62H6Y8.p8 ~/private_keys/AuthKey_599L62H6Y8.p8
+
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/output/*.ipa \
+            -t ios \
+            --apiKey "599L62H6Y8" \
+            --apiIssuer "e4c69502-cb98-4fed-b19b-e01d47c5c358"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          rm -f $RUNNER_TEMP/build_certificate.p12
+          rm -f $RUNNER_TEMP/build_pp.mobileprovision
+          rm -rf $RUNNER_TEMP/Payload $RUNNER_TEMP/output || true
+          rm -rf ~/private_keys || true
