@@ -167,6 +167,28 @@ jobs:
       - name: Install Pods
         run: cd ios/App && pod install --repo-update
 
+      - name: Configure manual signing in Xcode project
+        run: |
+          cd ios/App
+          python3 << 'SIGNEOF'
+          import re
+          pbx = "App.xcodeproj/project.pbxproj"
+          with open(pbx, "r") as f:
+              content = f.read()
+          content = content.replace("CODE_SIGN_STYLE = Automatic", "CODE_SIGN_STYLE = Manual")
+          content = content.replace("ProvisioningStyle = Automatic", "ProvisioningStyle = Manual")
+          if "PROVISIONING_PROFILE_SPECIFIER" not in content:
+              content = re.sub(
+                  r'(CODE_SIGN_IDENTITY = "[^"]*";)',
+                  r'\1\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "TacticalPrompt AppStore";',
+                  content
+              )
+          with open(pbx, "w") as f:
+              f.write(content)
+          print("Manual signing configured in pbxproj")
+          SIGNEOF
+          echo "Xcode project configured for manual signing"
+
       - name: Build archive
         run: |
           cd ios/App
@@ -174,10 +196,11 @@ jobs:
             -workspace App.xcworkspace \
             -scheme "$SCHEME" \
             -configuration Release \
+            -destination "generic/platform=iOS" \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             CODE_SIGN_IDENTITY="$SIGN_ID" \
             CODE_SIGN_STYLE=Manual \
-            PROVISIONING_PROFILE="$PP_UUID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PP_NAME" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             -quiet
 
