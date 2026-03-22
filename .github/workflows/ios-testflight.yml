@@ -87,8 +87,7 @@ jobs:
               ("AppIcon-76", ["ipad"], "76x76", [2]),
               ("AppIcon-83.5", ["ipad"], "83.5x83.5", [2]),
               ("AppIcon-1024", ["ios-marketing"], "1024x1024", [1])
-          ]
-          for prefix, idioms, size, scales in icon_map:
+          ]          for prefix, idioms, size, scales in icon_map:
               for idiom in idioms:
                   for scale in scales:
                       fname = f"{prefix}@{scale}x.png" if scale > 1 else f"{prefix}.png"
@@ -126,9 +125,21 @@ jobs:
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
 
-          security import $CERTIFICATE_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH || true
-          security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH || true
+          security import $CERTIFICATE_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH 2>&1 || true
+          security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH 2>&1 || true
           security list-keychain -d user -s $KEYCHAIN_PATH
+
+          echo "=== Available signing identities ==="
+          security find-identity -v -p codesigning $KEYCHAIN_PATH || true
+          security find-identity -v -p codesigning || true
+
+          SIGN_ID=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ -z "$SIGN_ID" ]; then
+            echo "WARNING: No signing identity found in custom keychain, checking default"
+            SIGN_ID=$(security find-identity -v -p codesigning | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "SIGN_ID=$SIGN_ID" >> $GITHUB_ENV
+          echo "Using signing identity: $SIGN_ID"
 
           python3 -c "
           import sys
@@ -165,8 +176,7 @@ jobs:
           cd ios/App
           xcodebuild archive \
             -workspace App.xcworkspace \
-            -scheme "$SCHEME" \
-            -configuration Release \
+            -scheme "$SCHEME" \            -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -195,14 +205,20 @@ jobs:
 
           cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
 
+          echo "Signing with identity: $SIGN_ID"
+          if [ -z "$SIGN_ID" ]; then
+            echo "ERROR: No signing identity available"
+            exit 1
+          fi
+
           if [ -d "$APP_PATH/Frameworks" ]; then
             find "$APP_PATH/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) | while read fw; do
               echo "Signing framework: $fw"
-              codesign --force --sign "Apple Distribution" --timestamp=none "$fw"
+              codesign --force --sign "$SIGN_ID" --timestamp=none "$fw"
             done
           fi
 
-          codesign --force --sign "Apple Distribution" \
+          codesign --force --sign "$SIGN_ID" \
             --entitlements $RUNNER_TEMP/entitlements.plist \
             --timestamp=none \
             "$APP_PATH"
