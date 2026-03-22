@@ -67,7 +67,9 @@ jobs:
         run: npm run build
 
       - name: Setup Capacitor iOS
-        run: npx cap sync ios
+        run: |
+          npx cap add ios
+          npx cap sync ios
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
