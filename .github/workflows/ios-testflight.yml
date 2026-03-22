@@ -13,8 +13,8 @@ jobs:
       BUNDLE_ID: "com.uamkoreatech.tacticalprompt"
       WEBSITE_URL: "https://tacticalprompt.blogspot.com"
       TEAM_ID: "FMAB3J4HQ2"
-      APP_STORE_CONNECT_KEY_ID: "RH325U6QY2"
-      APP_STORE_CONNECT_ISSUER_ID: "4a963b2f-89f5-4e18-8389-44547caa0847"
+      APP_STORE_CONNECT_KEY_ID: "599L62H6Y8"
+      APP_STORE_CONNECT_ISSUER_ID: "e4c69502-cb98-4fed-b19b-e01d47c5c358"
 
     steps:
       - uses: actions/checkout@v4
