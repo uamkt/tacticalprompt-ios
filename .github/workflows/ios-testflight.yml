@@ -1,0 +1,269 @@
+name: iOS TestFlight Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_ID: "com.uamkoreatech.tacticalprompt"
+  APP_NAME: "TacticalPrompt"
+  SCHEME: "App"
+  XCODE_VERSION: "16.2"
+
+jobs:
+  build-and-deploy:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Verify web assets
+        run: |
+          if [ ! -d "dist" ] && [ ! -d "build" ] && [ ! -d "www" ]; then
+            echo "ERROR: No web build output found"
+            exit 1
+          fi
+          echo "Web assets verified successfully"
+
+      - name: Install Capacitor iOS platform
+        run: |
+          npm install @capacitor/ios
+          npx cap add ios || true
+          npx cap sync ios
+
+      - name: Generate TacticalPrompt app icon
+        run: |
+          pip3 install Pillow
+          python3 << 'PYEOF'
+          from PIL import Image, ImageDraw, ImageFont
+          import os, json
+
+          sizes = {
+            "AppIcon-20@2x.png": 40, "AppIcon-20@3x.png": 60,
+            "AppIcon-29@2x.png": 58, "AppIcon-29@3x.png": 87,
+            "AppIcon-40@2x.png": 80, "AppIcon-40@3x.png": 120,
+            "AppIcon-60@2x.png": 120, "AppIcon-60@3x.png": 180,
+            "AppIcon-76@2x.png": 152, "AppIcon-83.5@2x.png": 167,
+            "AppIcon-1024.png": 1024
+          }
+
+          icon_dir = "ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          os.makedirs(icon_dir, exist_ok=True)
+
+          for fname, sz in sizes.items():
+              img = Image.new("RGB", (sz, sz), "#1a1a2e")
+              draw = ImageDraw.Draw(img)
+              draw.rectangle([0, 0, sz-1, sz-1], outline="#e94560", width=max(1, sz//32))
+              draw.rectangle([sz//6, sz//6, sz*5//6, sz*5//6], outline="#0f3460", width=max(1, sz//40))
+              try:
+                  font = ImageFont.truetype("/Library/Fonts/Arial Bold.ttf", sz//4)
+              except:
+                  font = ImageFont.load_default()
+              draw.text((sz//2, sz//2), "TP", fill="#e94560", font=font, anchor="mm")
+              img.save(os.path.join(icon_dir, fname))
+
+          contents = {"images": [], "info": {"version": 1, "author": "xcode"}}
+          icon_map = [
+              ("AppIcon-20", ["iphone","ipad"], "20x20", [2,3]),
+              ("AppIcon-29", ["iphone","ipad"], "29x29", [2,3]),
+              ("AppIcon-40", ["iphone","ipad"], "40x40", [2,3]),
+              ("AppIcon-60", ["iphone"], "60x60", [2,3]),
+              ("AppIcon-76", ["ipad"], "76x76", [2]),
+              ("AppIcon-83.5", ["ipad"], "83.5x83.5", [2]),
+              ("AppIcon-1024", ["ios-marketing"], "1024x1024", [1])
+          ]
+          for prefix, idioms, size, scales in icon_map:
+              for idiom in idioms:
+                  for scale in scales:
+                      fname = f"{prefix}@{scale}x.png" if scale > 1 else f"{prefix}.png"
+                      contents["images"].append({"size": size, "idiom": idiom, "filename": fname, "scale": f"{scale}x"})
+
+          with open(os.path.join(icon_dir, "Contents.json"), "w") as f:
+              json.dump(contents, f, indent=2)
+          print("Icon generation complete")
+          PYEOF
+
+      - name: Set build number
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          PLIST_PATH="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" "$PLIST_PATH"
+          echo "Build number: $BUILD_NUM"
+
+      - name: Setup provisioning
+        env:
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          set +e
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          base64 --decode -i certs/dist_certificate.b64 -o $CERTIFICATE_PATH
+          echo "Certificate file size: $(wc -c < $CERTIFICATE_PATH) bytes"
+
+          base64 --decode -i provisioning/tacticalprompt_appstore.b64 -o $PP_PATH
+          echo "Profile file size: $(wc -c < $PP_PATH) bytes"
+
+          security create-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+
+          security import $CERTIFICATE_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH || true
+          security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH || true
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          python3 -c "
+          import sys
+          data = open(sys.argv[1], 'rb').read()
+          start = data.find(b'<?xml')
+          end = data.find(b'</plist>') + len(b'</plist>')
+          if start >= 0 and end > start:
+              sys.stdout.write(data[start:end].decode('utf-8'))
+          else:
+              print('ERROR: Could not find plist in profile', file=sys.stderr)
+              sys.exit(1)
+          " $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+
+          echo "Profile plist size: $(wc -c < $RUNNER_TEMP/profile_decoded.plist) bytes"
+
+          PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" $RUNNER_TEMP/profile_decoded.plist)
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" $RUNNER_TEMP/profile_decoded.plist)
+          PP_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" $RUNNER_TEMP/profile_decoded.plist)
+
+          echo "PP_UUID=$PP_UUID" >> $GITHUB_ENV
+          echo "TEAM_ID=$TEAM_ID" >> $GITHUB_ENV
+          echo "PP_NAME=$PP_NAME" >> $GITHUB_ENV
+          echo "Profile: UUID=$PP_UUID TEAM=$TEAM_ID NAME=$PP_NAME"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
+          echo "Provisioning setup complete"
+
+      - name: Disable code signing for Pods
+        run: |
+          PODFILE="ios/App/Podfile"
+          if [ -f "$PODFILE" ]; then
+            if ! grep -q "CODE_SIGNING_ALLOWED" "$PODFILE"; then
+              cat >> "$PODFILE" << 'PODEOF'
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+              end
+            end
+          end
+          PODEOF
+            fi
+          fi
+          cd ios/App && pod install --repo-update
+
+      - name: Build archive
+        run: |
+          cd ios/App
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -quiet
+
+      - name: Sign and package IPA
+        run: |
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          APP_PATH="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
+
+          if [ ! -s $RUNNER_TEMP/profile_decoded.plist ]; then
+            echo "ERROR: profile_decoded.plist missing from provisioning step"
+            exit 1
+          fi
+          echo "Profile decoded successfully (reusing from provisioning step)"
+
+          /usr/libexec/PlistBuddy -x -c "Print Entitlements" $RUNNER_TEMP/profile_decoded.plist > $RUNNER_TEMP/entitlements.plist
+
+          echo "Entitlements:"
+          cat $RUNNER_TEMP/entitlements.plist
+
+          cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
+
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) | while read fw; do
+              echo "Signing framework: $fw"
+              codesign --force --sign "Apple Distribution" --timestamp=none "$fw"
+            done
+          fi
+
+          codesign --force --sign "Apple Distribution" \
+            --entitlements $RUNNER_TEMP/entitlements.plist \
+            --timestamp=none \
+            "$APP_PATH"
+
+          codesign --verify --deep --strict "$APP_PATH" && echo "Code signature valid"
+
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -r "$APP_PATH" $RUNNER_TEMP/Payload/
+          mkdir -p $RUNNER_TEMP/output
+          cd $RUNNER_TEMP && zip -qr output/App.ipa Payload
+
+          echo "IPA size: $(du -h $RUNNER_TEMP/output/App.ipa | cut -f1)"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TacticalPrompt-IPA
+          path: ${{ runner.temp }}/output/App.ipa
+
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          KEY_PATH=$RUNNER_TEMP/api_key.p8
+          echo "$APP_STORE_CONNECT_API_KEY" > $KEY_PATH
+
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/output/App.ipa \
+            -t ios \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --verbose
+
+          echo "Upload to TestFlight complete"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          rm -f $RUNNER_TEMP/build_certificate.p12
+          rm -f $RUNNER_TEMP/build_pp.mobileprovision
+          rm -f $RUNNER_TEMP/api_key.p8
+          echo "Cleanup complete"
+
