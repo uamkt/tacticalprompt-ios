@@ -1,276 +1,31 @@
-name: iOS TestFlight Build
+name: iOS TestFlight Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
+env:
+  APP_ID: "com.uamkoreatech.tacticalprompt"
+  APP_NAME: "TacticalPrompt"
+  SCHEME: "App"
+  XCODE_VERSION: "16.2"
+  TEAM_ID: "FMAB3J4HQ2"
+  APP_STORE_CONNECT_KEY_ID: "599L62H6Y8"
+  APP_STORE_CONNECT_ISSUER_ID: "e4c69502-cb98-4fed-b19b-e01d47c5c358"
+  WEBSITE_URL: "https://tacticalprompt.blogspot.com"
+
 jobs:
-  build:
-    runs-on: macos-15
-    env:
-      APP_NAME: "TacticalPrompt"
-      BUNDLE_ID: "com.uamkoreatech.tacticalprompt"
-      WEBSITE_URL: "https://tacticalprompt.blogspot.com"
-      TEAM_ID: "FMAB3J4HQ2"
-      APP_STORE_CONNECT_KEY_ID: "599L62H6Y8"
-      APP_STORE_CONNECT_ISSUER_ID: "e4c69502-cb98-4fed-b19b-e01d47c5c358"
+  build-and-deploy:
+    runs-on: macos-14
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Python for icon generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Pillow for icon generation
-        run: pip install Pillow
-
-      - name: Create Capacitor project
-        run: |
-          npm init -y
-          npm install @capacitor/core @capacitor/ios @capacitor/cli
-
-          npx cap init "$APP_NAME" "$BUNDLE_ID" --web-dir=dist
-
-          mkdir -p dist
-          cat > dist/index.html << 'HTMLEOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-            <title>TacticalPrompt</title>
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: #0a0a0a;
-                color: #e0e0e0;
-                min-height: 100vh;
-                display: flex;
-                flex-direction: column;
-              }
-              .header {
-                background: linear-gradient(135deg, #ff6b00 0%, #ff8c00 100%);
-                padding: 60px 20px 30px;
-                text-align: center;
-              }
-              .header h1 { font-size: 28px; font-weight: 800; color: white; }
-              .header p { font-size: 14px; color: rgba(255,255,255,0.85); margin-top: 8px; }
-              .content { flex: 1; padding: 20px; }
-              .card {
-                background: #1a1a2e;
-                border-radius: 16px;
-                padding: 24px;
-                margin-bottom: 16px;
-                border: 1px solid #2a2a4a;
-              }
-              .card h2 { font-size: 18px; color: #ff8c00; margin-bottom: 12px; }
-              .card p { font-size: 14px; line-height: 1.6; color: #b0b0b0; }
-              .badge {
-                display: inline-block;
-                background: #ff6b00;
-                color: white;
-                padding: 4px 12px;
-                border-radius: 20px;
-                font-size: 11px;
-                font-weight: 600;
-                margin: 4px;
-              }
-              .cta-btn {
-                display: block;
-                background: linear-gradient(135deg, #ff6b00, #ff8c00);
-                color: white;
-                text-align: center;
-                padding: 16px;
-                border-radius: 12px;
-                font-size: 16px;
-                font-weight: 700;
-                text-decoration: none;
-                margin-top: 20px;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>TacticalPrompt</h1>
-              <p>AI Tactical Prompt Engineering Platform</p>
-            </div>
-            <div class="content">
-              <div class="card">
-                <h2>Mission-Critical AI Prompts</h2>
-                <p>TacticalPrompt delivers precision-engineered AI prompt templates for defense, security, and tactical operations.</p>
-              </div>
-              <div class="card">
-                <h2>Key Capabilities</h2>
-                <div>
-                  <span class="badge">CBRN Analysis</span>
-                  <span class="badge">Threat Assessment</span>
-                  <span class="badge">Intel Synthesis</span>
-                  <span class="badge">Ops Planning</span>
-                  <span class="badge">Risk Modeling</span>
-                </div>
-              </div>
-              <a class="cta-btn" href="https://tacticalprompt.blogspot.com">Visit TacticalPrompt</a>
-            </div>
-          </body>
-          </html>
-          HTMLEOF
-
-          npx cap add ios || true
-
-          # Fix CocoaPods minimum deployment target for Capacitor 7.x
-          cd ios/App
-          sed -i '' "s/platform :ios, '13.0'/platform :ios, '16.0'/" Podfile
-          sed -i '' "s/platform :ios, '14.0'/platform :ios, '16.0'/" Podfile
-          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g" App.xcodeproj/project.pbxproj
-          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 14.0/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g" App.xcodeproj/project.pbxproj
-          pod install
-          cd ../..
-
-      - name: Generate TacticalPrompt App Icon
-        run: |
-          python3 << 'PYEOF'
-          from PIL import Image, ImageDraw, ImageFont
-          import math
-
-          size = 1024
-          img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-          draw = ImageDraw.Draw(img)
-
-          # Dark background with orange gradient feel
-          for y in range(size):
-              r = int(10 + (y/size) * 15)
-              g = int(10 + (y/size) * 8)
-              b = int(10 + (y/size) * 5)
-              draw.line([(0, y), (size, y)], fill=(r, g, b))
-
-          # Orange accent circle (outer ring)
-          cx, cy = size//2, size//2
-          for radius in range(380, 420):
-              alpha = int(255 * (1 - abs(radius - 400) / 20))
-              for angle in range(0, 360, 1):
-                  rad = math.radians(angle)
-                  x = cx + int(radius * math.cos(rad))
-                  y = cy + int(radius * math.sin(rad))
-                  if 0 <= x < size and 0 <= y < size:
-                      draw.point((x, y), fill=(255, 107, 0, alpha))
-
-          # Inner targeting crosshair
-          line_color = (255, 140, 0, 180)
-          draw.line([(cx-300, cy), (cx-150, cy)], fill=line_color, width=3)
-          draw.line([(cx+150, cy), (cx+300, cy)], fill=line_color, width=3)
-          draw.line([(cx, cy-300), (cx, cy-150)], fill=line_color, width=3)
-          draw.line([(cx, cy+150), (cx, cy+300)], fill=line_color, width=3)
-
-          # Center dot
-          draw.ellipse([(cx-20, cy-20), (cx+20, cy+20)], fill=(255, 107, 0))
-
-          # Corner tactical markers
-          marker_color = (255, 140, 0, 200)
-          draw.line([(80, 80), (80, 180)], fill=marker_color, width=4)
-          draw.line([(80, 80), (180, 80)], fill=marker_color, width=4)
-          draw.line([(size-80, 80), (size-80, 180)], fill=marker_color, width=4)
-          draw.line([(size-80, 80), (size-180, 80)], fill=marker_color, width=4)
-          draw.line([(80, size-80), (80, size-180)], fill=marker_color, width=4)
-          draw.line([(80, size-80), (180, size-80)], fill=marker_color, width=4)
-          draw.line([(size-80, size-80), (size-80, size-180)], fill=marker_color, width=4)
-          draw.line([(size-80, size-80), (size-180, size-80)], fill=marker_color, width=4)
-
-          # TP text in center
-          try:
-              font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 200)
-          except:
-              try:
-                  font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 200)
-              except:
-                  font = ImageFont.load_default()
-
-          text = "TP"
-          bbox = draw.textbbox((0, 0), text, font=font)
-          tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-          tx = (size - tw) // 2
-          ty = (size - th) // 2 - 20
-          draw.text((tx+3, ty+3), text, fill=(0, 0, 0, 150), font=font)
-          draw.text((tx, ty), text, fill=(255, 140, 0), font=font)
-
-          # TACTICAL text below
-          try:
-              small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 60)
-          except:
-              try:
-                  small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 60)
-              except:
-                  small_font = ImageFont.load_default()
-
-          sub_text = "TACTICAL"
-          bbox2 = draw.textbbox((0, 0), sub_text, font=small_font)
-          stw = bbox2[2] - bbox2[0]
-          draw.text(((size - stw) // 2, cy + 130), sub_text, fill=(255, 107, 0, 200), font=small_font)
-
-          final = img.convert('RGB')
-          final.save('app_icon_1024.png')
-          print('TacticalPrompt icon generated: 1024x1024')
-
-          sizes_needed = [1024, 512, 256, 180, 167, 152, 144, 120, 114, 87, 80, 76, 72, 60, 58, 57, 50, 48, 40, 36, 29, 20, 16]
-          import os
-          icon_dir = 'ios/App/App/Assets.xcassets/AppIcon.appiconset'
-          os.makedirs(icon_dir, exist_ok=True)
-
-          for s in sizes_needed:
-              resized = final.resize((s, s), Image.LANCZOS)
-              resized.save(f'{icon_dir}/AppIcon-{s}x{s}.png')
-              print(f'  Generated {s}x{s}')
-
-          final.save(f'{icon_dir}/AppIcon-1024x1024.png')
-
-          contents = {
-              "images": [
-                  {"size": "20x20", "idiom": "iphone", "filename": "AppIcon-40x40.png", "scale": "2x"},
-                  {"size": "20x20", "idiom": "iphone", "filename": "AppIcon-60x60.png", "scale": "3x"},
-                  {"size": "29x29", "idiom": "iphone", "filename": "AppIcon-58x58.png", "scale": "2x"},
-                  {"size": "29x29", "idiom": "iphone", "filename": "AppIcon-87x87.png", "scale": "3x"},
-                  {"size": "40x40", "idiom": "iphone", "filename": "AppIcon-80x80.png", "scale": "2x"},
-                  {"size": "40x40", "idiom": "iphone", "filename": "AppIcon-120x120.png", "scale": "3x"},
-                  {"size": "60x60", "idiom": "iphone", "filename": "AppIcon-120x120.png", "scale": "2x"},
-                  {"size": "60x60", "idiom": "iphone", "filename": "AppIcon-180x180.png", "scale": "3x"},
-                  {"size": "20x20", "idiom": "ipad", "filename": "AppIcon-20x20.png", "scale": "1x"},
-                  {"size": "20x20", "idiom": "ipad", "filename": "AppIcon-40x40.png", "scale": "2x"},
-                  {"size": "29x29", "idiom": "ipad", "filename": "AppIcon-29x29.png", "scale": "1x"},
-                  {"size": "29x29", "idiom": "ipad", "filename": "AppIcon-58x58.png", "scale": "2x"},
-                  {"size": "40x40", "idiom": "ipad", "filename": "AppIcon-40x40.png", "scale": "1x"},
-                  {"size": "40x40", "idiom": "ipad", "filename": "AppIcon-80x80.png", "scale": "2x"},
-                  {"size": "76x76", "idiom": "ipad", "filename": "AppIcon-76x76.png", "scale": "1x"},
-                  {"size": "76x76", "idiom": "ipad", "filename": "AppIcon-152x152.png", "scale": "2x"},
-                  {"size": "83.5x83.5", "idiom": "ipad", "filename": "AppIcon-167x167.png", "scale": "2x"},
-                  {"size": "1024x1024", "idiom": "ios-marketing", "filename": "AppIcon-1024x1024.png", "scale": "1x"}
-              ],
-              "info": {"version": 1, "author": "xcode"}
-          }
-          import json
-          with open(f'{icon_dir}/Contents.json', 'w') as f:
-              json.dump(contents, f, indent=2)
-          print('Contents.json generated')
-          PYEOF
-
-      - name: Update Xcode project settings
-        run: |
-          cd ios/App
-          sed -i '' "s/com\.getcapacitor\.myapp/$BUNDLE_ID/g" App.xcodeproj/project.pbxproj
-          sed -i '' "s/io\.ionic\.starter/$BUNDLE_ID/g" App.xcodeproj/project.pbxproj
-          sed -i '' "s/DEVELOPMENT_TEAM = \"\"/DEVELOPMENT_TEAM = $TEAM_ID/g" App.xcodeproj/project.pbxproj
-          if ! grep -q "DEVELOPMENT_TEAM = $TEAM_ID" App.xcodeproj/project.pbxproj; then
-            sed -i '' "s/buildSettings = {/buildSettings = {\n\t\t\t\tDEVELOPMENT_TEAM = $TEAM_ID;/g" App.xcodeproj/project.pbxproj
-          fi
-          plutil -replace CFBundleDisplayName -string "$APP_NAME" App/Info.plist
-          cd ../..
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
 
       - name: Setup provisioning
         run: |
@@ -278,83 +33,153 @@ jobs:
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
 
-          # Decode certificate from committed base64 file
           base64 --decode -i certs/dist_certificate.b64 -o $CERTIFICATE_PATH
-          echo "Certificate file size: $(wc -c < $CERTIFICATE_PATH) bytes"
+          base64 --decode -i provisioning/tacticalprompt_appstore.b64 -o $PP_PATH
 
-          # Create and configure signing keychain
           security create-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
-
-          # Import distribution certificate
-          security import $CERTIFICATE_PATH -P "blisd2024" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "ci_keychain_pass" $KEYCHAIN_PATH
+          security import $CERTIFICATE_PATH -P "" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-          # Verify certificate imported
-          security find-identity -v -p codesigning $KEYCHAIN_PATH
-          echo "Certificate setup complete"
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+          PP_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" $RUNNER_TEMP/profile_decoded.plist)
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" $RUNNER_TEMP/profile_decoded.plist)
+          PP_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" $RUNNER_TEMP/profile_decoded.plist)
 
-      - name: Setup App Store Connect API Key
-        run: |
-          mkdir -p ~/.appstoreconnect/private_keys
+          echo "PP_UUID=$PP_UUID" >> $GITHUB_ENV
+          echo "TEAM_ID=$TEAM_ID" >> $GITHUB_ENV
+          echo "PP_NAME=$PP_NAME" >> $GITHUB_ENV
 
-          if [ -n "${{ secrets.APP_STORE_CONNECT_API_KEY }}" ]; then
-            echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8
-          elif [ -f "certs/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8" ]; then
-            cp "certs/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8" ~/.appstoreconnect/private_keys/
-          fi
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
 
-      - name: Build and Archive
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Setup Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Install CocoaPods
         run: |
           cd ios/App
-          xcodebuild -workspace App.xcworkspace \
-            -scheme App \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/App.xcarchive \
-            -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
-            -authenticationKeyID $APP_STORE_CONNECT_KEY_ID \
-            -authenticationKeyIssuerID $APP_STORE_CONNECT_ISSUER_ID \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=$TEAM_ID \
-            archive
+          gem install cocoapods
+          pod install
 
-      - name: Export IPA
+      - name: Disable code signing for Pods
         run: |
-          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store-connect</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>destination</key>
-              <string>upload</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-          </dict>
-          </plist>
-          EOF
+          cd ios/App
+          python3 << 'PYEOF'
+          with open('Podfile', 'r') as f:
+            content = f.read()
+          inject = """
+              installer.pods_project.targets.each do |target|
+                target.build_configurations.each do |config|
+                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                  config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                  config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                end
+              end
+          """
+          if 'post_install do |installer|' in content:
+            content = content.replace(
+              'post_install do |installer|',
+              'post_install do |installer|' + inject
+            )
+          else:
+            content += "\npost_install do |installer|" + inject + "\nend\n"
+          with open('Podfile', 'w') as f:
+            f.write(content)
+          PYEOF
+          cat Podfile
+          pod install
 
-          xcodebuild -exportArchive \
+      - name: Update bundle identifier and display name
+        run: |
+          cd ios/App/App
+          if [ -f Info.plist ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${{ env.APP_ID }}" Info.plist || true
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${{ env.APP_NAME }}" Info.plist || true
+          fi
+
+      - name: Set deployment target
+        run: |
+          cd ios/App
+          if [ -f App.xcodeproj/project.pbxproj ]; then
+            sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 14.0/g' App.xcodeproj/project.pbxproj
+          fi
+
+      - name: Build archive (unsigned)
+        run: |
+          cd ios/App
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme "${{ env.SCHEME }}" \
             -archivePath $RUNNER_TEMP/App.xcarchive \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
-            -authenticationKeyID $APP_STORE_CONNECT_KEY_ID \
-            -authenticationKeyIssuerID $APP_STORE_CONNECT_ISSUER_ID
+            -sdk iphoneos \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+
+      - name: Sign and package IPA
+        run: |
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          APP_PATH="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+          /usr/libexec/PlistBuddy -x -c "Print Entitlements" $RUNNER_TEMP/profile_decoded.plist > $RUNNER_TEMP/entitlements.plist
+
+          cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
+
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) | while read fw; do
+              codesign --force --sign "Apple Distribution" --timestamp=none "$fw"
+            done
+          fi
+
+          codesign --force --sign "Apple Distribution" \
+            --entitlements $RUNNER_TEMP/entitlements.plist \
+            --timestamp=none \
+            "$APP_PATH"
+
+          codesign --verify --deep --strict "$APP_PATH"
+
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -r "$APP_PATH" $RUNNER_TEMP/Payload/
+          mkdir -p $RUNNER_TEMP/output
+          cd $RUNNER_TEMP && zip -qr output/App.ipa Payload
 
       - name: Upload to TestFlight
         run: |
-          xcrun altool --upload-app \
-            -f $RUNNER_TEMP/export/App.ipa \
-            -t ios \
-            --apiKey $APP_STORE_CONNECT_KEY_ID \
-            --apiIssuer $APP_STORE_CONNECT_ISSUER_ID
+          mkdir -p ~/private_keys
+          cp certs/AuthKey_599L62H6Y8.p8 ~/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/output/*.ipa \
+            -t ios \
+            --apiKey "${{ env.APP_STORE_CONNECT_KEY_ID }}" \
+            --apiIssuer "${{ env.APP_STORE_CONNECT_ISSUER_ID }}"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          rm -rf $RUNNER_TEMP/Payload $RUNNER_TEMP/output || true
