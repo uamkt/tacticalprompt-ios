@@ -186,93 +186,93 @@ jobs:
           echo "=== End debug ==="
           echo "Provisioning setup complete"
 
+      - name: Disable code signing for Pods
+        run: |
+          cd ios/App
+          python3 << 'PYEOF'
+          with open('Podfile', 'r') as f:
+              content = f.read()
+          inject = """
+              installer.pods_project.targets.each do |target|
+                target.build_configurations.each do |config|
+                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                  config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                  config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                end
+              end
+          """
+          if 'post_install do |installer|' in content:
+              content = content.replace(
+                  'post_install do |installer|',
+                  'post_install do |installer|' + inject
+              )
+          else:
+              content += "\npost_install do |installer|" + inject + "\nend\n"
+          with open('Podfile', 'w') as f:
+              f.write(content)
+          print("Podfile updated to disable code signing for Pods")
+          PYEOF
+
       - name: Install Pods
         run: cd ios/App && pod install --repo-update
 
-      - name: Configure manual signing in Xcode project
-        run: |
-          cd ios/App
-          python3 << 'SIGNEOF'
-          import re
-          pbx = "App.xcodeproj/project.pbxproj"
-          with open(pbx, "r") as f:
-              content = f.read()
-
-          # Only modify App target build settings, not Pods
-          # Find the App target's buildSettings blocks and set manual signing
-          content = content.replace("CODE_SIGN_STYLE = Automatic", "CODE_SIGN_STYLE = Manual")
-          content = content.replace("ProvisioningStyle = Automatic", "ProvisioningStyle = Manual")
-
-          # Set development team
-          content = re.sub(
-              r'DEVELOPMENT_TEAM = [^;]*;',
-              'DEVELOPMENT_TEAM = 545S5F426R;',
-              content
-          )
-
-          # Add PROVISIONING_PROFILE_SPECIFIER only in buildSettings blocks that have CODE_SIGN_IDENTITY
-          # (these are the App target blocks, not Pod targets)
-          if "PROVISIONING_PROFILE_SPECIFIER" not in content:
-              content = re.sub(
-                  r'(CODE_SIGN_IDENTITY = "Apple Distribution[^"]*";)',
-                  r'\1\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "TacticalPrompt AppStore";',
-                  content
-              )
-
-          with open(pbx, "w") as f:
-              f.write(content)
-          print("Manual signing configured in pbxproj")
-          SIGNEOF
-          echo "Xcode project configured for manual signing"
-
-      - name: Build archive
+      - name: Build archive (unsigned)
         run: |
           cd ios/App
           xcodebuild archive \
             -workspace App.xcworkspace \
             -scheme "$SCHEME" \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -sdk iphoneos \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath $RUNNER_TEMP/App.xcarchive \
-            CODE_SIGN_IDENTITY="$SIGN_ID" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             -quiet
 
-      - name: Export IPA
+      - name: Sign and package IPA
         run: |
-          cat > $RUNNER_TEMP/ExportOptions.plist << 'EXPORTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>545S5F426R</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>com.uamkoreatech.tacticalprompt</key>
-              <string>TacticalPrompt AppStore</string>
-            </dict>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>uploadSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          EXPORTEOF
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          APP_PATH="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
 
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/App.xcarchive \
-            -exportPath $RUNNER_TEMP/output \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -quiet
+          # Extract entitlements from provisioning profile
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile_decoded.plist
+          /usr/libexec/PlistBuddy -x -c "Print Entitlements" $RUNNER_TEMP/profile_decoded.plist > $RUNNER_TEMP/entitlements.plist
+          echo "Entitlements extracted"
 
-          echo "IPA exported to:"
-          ls -la $RUNNER_TEMP/output/*.ipa
+          # Embed provisioning profile in app bundle
+          cp $PP_PATH "$APP_PATH/embedded.mobileprovision"
+
+          # Sign all frameworks first
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            find "$APP_PATH/Frameworks" -type d -name "*.framework" | while read fw; do
+              codesign --force --sign "$SIGN_ID" --keychain $RUNNER_TEMP/app-signing.keychain-db "$fw"
+            done
+            find "$APP_PATH/Frameworks" -name "*.dylib" | while read lib; do
+              codesign --force --sign "$SIGN_ID" --keychain $RUNNER_TEMP/app-signing.keychain-db "$lib"
+            done
+            echo "Frameworks signed"
+          fi
+
+          # Sign the main app
+          codesign --force --sign "$SIGN_ID" \
+            --keychain $RUNNER_TEMP/app-signing.keychain-db \
+            --entitlements $RUNNER_TEMP/entitlements.plist \
+            "$APP_PATH"
+          echo "App signed"
+
+          # Verify signature
+          codesign -vvv "$APP_PATH"
+
+          # Create IPA
+          mkdir -p $RUNNER_TEMP/output/Payload
+          cp -R "$APP_PATH" $RUNNER_TEMP/output/Payload/
+          cd $RUNNER_TEMP/output
+          zip -qr App.ipa Payload/
+          echo "IPA created:"
+          ls -la $RUNNER_TEMP/output/App.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
