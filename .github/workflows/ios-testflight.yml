@@ -153,41 +153,12 @@ jobs:
           echo "PP_NAME=$PP_NAME" >> $GITHUB_ENV
           echo "Profile: UUID=$PP_UUID TEAM=$TEAM_ID NAME=$PP_NAME"
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\\ Profiles/$PP_UUID.mobileprovision
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
           echo "Provisioning setup complete"
 
-      - name: Disable code signing for Pods
-        run: |
-          PODFILE="ios/App/Podfile"
-          if [ -f "$PODFILE" ]; then
-            ruby -e "
-              content = File.read('$PODFILE')
-              unless content.include?('CODE_SIGNING_ALLOWED')
-                inject = %(
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
-      end
-    end)
-                if content.include?('post_install')
-                  content.sub!(/post_install\\s+do\\s*\\|(\\w+)\\|/) { |m| m + inject.gsub('installer', \$1) }
-                else
-                  content += %(
-post_install do |installer|#{inject}
-end
-)
-                end
-                File.write('$PODFILE', content)
-                puts 'Podfile updated with code signing disabled'
-              else
-                puts 'CODE_SIGNING_ALLOWED already in Podfile'
-              end
-            "
-          fi
-          cd ios/App && pod install --repo-update
+      - name: Install Pods
+        run: cd ios/App && pod install --repo-update
 
       - name: Build archive
         run: |
