@@ -162,6 +162,18 @@ jobs:
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PP_UUID.mobileprovision
+          # Import Apple intermediate certificates for profile verification
+          curl -sL -o $RUNNER_TEMP/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import $RUNNER_TEMP/AppleWWDRCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign 2>&1 || true
+          curl -sL -o $RUNNER_TEMP/AppleWWDRCAG6.cer https://www.apple.com/certificateauthority/AppleWWDRCAG6.cer
+          security import $RUNNER_TEMP/AppleWWDRCAG6.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign 2>&1 || true
+          curl -sL -o $RUNNER_TEMP/AppleRootCAG3.cer https://www.apple.com/certificateauthority/AppleRootCA-G3.cer
+          security import $RUNNER_TEMP/AppleRootCAG3.cer -k $KEYCHAIN_PATH -T /usr/bin/codesign 2>&1 || true
+          echo "Apple intermediate certificates imported"
+
+          # Verify profile can be decoded via security cms
+          security cms -D -i $PP_PATH > /dev/null 2>&1 && echo "Profile CMS verification: OK" || echo "Profile CMS verification: FAILED (may still work)"
+
           echo "Provisioning setup complete"
 
       - name: Install Pods
@@ -175,14 +187,28 @@ jobs:
           pbx = "App.xcodeproj/project.pbxproj"
           with open(pbx, "r") as f:
               content = f.read()
+
+          # Only modify App target build settings, not Pods
+          # Find the App target's buildSettings blocks and set manual signing
           content = content.replace("CODE_SIGN_STYLE = Automatic", "CODE_SIGN_STYLE = Manual")
           content = content.replace("ProvisioningStyle = Automatic", "ProvisioningStyle = Manual")
+
+          # Set development team
+          content = re.sub(
+              r'DEVELOPMENT_TEAM = [^;]*;',
+              'DEVELOPMENT_TEAM = 545S5F426R;',
+              content
+          )
+
+          # Add PROVISIONING_PROFILE_SPECIFIER only in buildSettings blocks that have CODE_SIGN_IDENTITY
+          # (these are the App target blocks, not Pod targets)
           if "PROVISIONING_PROFILE_SPECIFIER" not in content:
               content = re.sub(
-                  r'(CODE_SIGN_IDENTITY = "[^"]*";)',
+                  r'(CODE_SIGN_IDENTITY = "Apple Distribution[^"]*";)',
                   r'\1\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "TacticalPrompt AppStore";',
                   content
               )
+
           with open(pbx, "w") as f:
               f.write(content)
           print("Manual signing configured in pbxproj")
@@ -200,7 +226,6 @@ jobs:
             -archivePath $RUNNER_TEMP/App.xcarchive \
             CODE_SIGN_IDENTITY="$SIGN_ID" \
             CODE_SIGN_STYLE=Manual \
-            PROVISIONING_PROFILE_SPECIFIER="$PP_NAME" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             -quiet
 
