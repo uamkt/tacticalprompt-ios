@@ -39,7 +39,7 @@ jobs:
           security create-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "ci_keychain_pass" $KEYCHAIN_PATH
-          security import $CERTIFICATE_PATH -P "" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security import $CERTIFICATE_PATH -P "blisd2024" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple: -k "ci_keychain_pass" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
