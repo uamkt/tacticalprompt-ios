@@ -49,7 +49,7 @@ jobs:
 
       - name: Generate TacticalPrompt app icon
         run: |
-          pip3 install Pillow
+          pip3 install --break-system-packages Pillow
           python3 << 'PYEOF'
           from PIL import Image, ImageDraw, ImageFont
           import os, json
