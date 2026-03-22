@@ -1,0 +1,24 @@
+{
+  "name": "tacticalprompt",
+  "version": "1.0.0",
+  "description": "TacticalPrompt — AI-Powered Tactical Decision Support",
+  "main": "dist/index.html",
+  "scripts": {
+    "build": "echo 'dist pre-built'",
+    "cap:init": "npx cap init \"TacticalPrompt\" \"com.uamkoreatech.tacticalprompt\" --web-dir dist",
+    "cap:add:ios": "npx cap add ios",
+    "cap:sync": "npx cap sync ios",
+    "cap:open": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/ios": "^6.0.0",
+    "@capacitor/haptics": "^6.0.0",
+    "@capacitor/device": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}
