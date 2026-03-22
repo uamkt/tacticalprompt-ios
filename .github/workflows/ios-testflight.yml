@@ -287,6 +287,24 @@ jobs:
           mkdir -p ~/private_keys
           cp $API_KEY_PATH ~/private_keys/AuthKey_599L62H6Y8.p8
 
+          echo "=== Codesign verification ==="
+          codesign -d -vvv $RUNNER_TEMP/output/Payload/App.app 2>&1 || true
+          echo "=== End codesign ==="
+
+          echo "=== Embedded profile check ==="
+          security cms -D -i $RUNNER_TEMP/output/Payload/App.app/embedded.mobileprovision 2>/dev/null | head -40 || true
+          echo "=== End embedded profile ==="
+
+          echo "=== Validate IPA ==="
+          xcrun altool --validate-app \
+            -f $RUNNER_TEMP/output/App.ipa \
+            -t ios \
+            --apiKey "599L62H6Y8" \
+            --apiIssuer "e4c69502-cb98-4fed-b19b-e01d47c5c358" \
+            --verbose 2>&1 || true
+          echo "=== End validate ==="
+
+          echo "Uploading..."
           xcrun altool --upload-app \
             -f $RUNNER_TEMP/output/App.ipa \
             -t ios \
